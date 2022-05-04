@@ -14,21 +14,12 @@ SANDBOX_TOKEN = keyring.get_password('TOKEN', 'SANDBOX')
 sandbox_account_id = keyring.get_password('ACCOUNT_ID', 'SANDBOX')
 
 
-def select_strategy():
-    pass
-
-
-
-
-
 def main():
     with Client(token=TOKEN) as client:
-        # select strategy for current user and figi
-        strategy = select_strategy()
-
         stats = Stats(client)
         historical_data = stats.get_historical_candles(figi=figi, interval=CandleInterval(5), period='mon')
-        features = stats.make_features(df=historical_data,ma_window=5,ema_window=30)
+        features = stats.make_features(ema_window=6,ma_window=10)
+        print(historical_data)
         print(features)
 
 if __name__ == "__main__":
