@@ -3,6 +3,8 @@ from typing import Dict, List
 from sklearn.linear_model import LinearRegression
 import pandas as pd
 from tinkoff.invest import InstrumentIdType, CandleInterval
+from tinkoff.invest.utils import quotation_to_decimal
+from decimal import Decimal
 
 from tinkoff.invest.utils import now
 
@@ -35,9 +37,9 @@ class Stats:
         ask = self._client.market_data.get_order_book(figi=figi, depth=depth).asks
 
         for i in range(len(bids)):
-            book["bid"].append(float(str(bids[i].price.units) + '.' + str(bids[i].price.nano)) * lot)
+            book["bid"].append(quotation_to_decimal(bids[i].price) * lot)
         for i in range(len(ask)):
-            book["ask"].append(float(str(ask[i].price.units) + '.' + str(ask[i].price.nano)) * lot)
+            book["ask"].append(quotation_to_decimal(ask[i].price) * lot)
 
         return book
 
@@ -79,10 +81,10 @@ class Stats:
             volumes = []
             is_completes = []
             for candle in list_candels:
-                highs.append(float(str(candle.high.units) + '.' + str(candle.high.nano)))
-                lows.append(float(str(candle.low.units) + '.' + str(candle.low.nano)))
-                opens.append(float(str(candle.open.units) + '.' + str(candle.open.nano)))
-                closes.append(float(str(candle.close.units) + '.' + str(candle.close.nano)))
+                highs.append(quotation_to_decimal(candle.high))
+                lows.append(quotation_to_decimal(candle.low))
+                opens.append(quotation_to_decimal(candle.open))
+                closes.append(quotation_to_decimal(candle.close))
                 volumes.append(candle.volume)
                 times.append(candle.time)
                 is_completes.append(candle.is_complete)
