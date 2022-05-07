@@ -1,3 +1,7 @@
 # invest_tb
-make algo-trading bot
-test_stats/test_stats.py for checking stats module
+## DASHBOARD
+- Collect_data/collect_all_candles update function : merge from 2000 to now 
+- Make CLass User
+- Realize logic for strategy
+- Realize simple strategy
+- Create class for sql queries for simply collcting data
