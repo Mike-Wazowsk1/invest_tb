@@ -122,7 +122,7 @@ def create_dataset(list_candels: List = None, figi: str = None) -> pd.DataFrame:
     return df
 
 
-def get_all_candles2000_2022(idx):  # DATA from 01.01.2000 to 01.01.2022 todo from 01.01.2022 to now
+def get_all_candles(idx):
     with Client(SANDBOX_TOKEN) as client:
         start = datetime(2000, 1, 1)
         tmp_df = []
@@ -130,16 +130,27 @@ def get_all_candles2000_2022(idx):  # DATA from 01.01.2000 to 01.01.2022 todo fr
         errors = {}
         f = []
         l = []
-        for y in range(now().year - start.year):
-            try:
-                candle = client.market_data.get_candles(figi=idx,
-                                                        from_=datetime(start.year + y, start.month, start.day),
-                                                        to=datetime(start.year + y + 1, start.month, start.day),
-                                                        interval=CandleInterval(5)).candles
-                candles.append(candle)
-            except:
-                f.append(idx)
-                l.append(y)
+        for y in range(now().year - start.year + 1):
+            if y == 22:
+                try:
+                    candle = client.market_data.get_candles(figi=idx,
+                                                            from_=datetime(2022, 1, 1),
+                                                            to=now(),
+                                                            interval=CandleInterval(5)).candles
+                    candles.append(candle)
+                except:
+                    f.append(idx)
+                    l.append(y)
+            else:
+                try:
+                    candle = client.market_data.get_candles(figi=idx,
+                                                            from_=datetime(start.year + y, start.month, start.day),
+                                                            to=datetime(start.year + y + 1, start.month, start.day),
+                                                            interval=CandleInterval(5)).candles
+                    candles.append(candle)
+                except:
+                    f.append(idx)
+                    l.append(y)
 
         for c in candles:
             tmp_df.append(create_dataset(c, idx))
@@ -148,33 +159,15 @@ def get_all_candles2000_2022(idx):  # DATA from 01.01.2000 to 01.01.2022 todo fr
     return tmp_df, errors
 
 
-def get_all_candles2022_now(idx):
-    with Client(SANDBOX_TOKEN) as client:
-        tmp_df = []
-        candles = []
-        errors = {}
-        f = []
-        l = []
-        try:
-            candle = client.market_data.get_candles(figi=idx,
-                                                    from_=datetime(2022, 1, 1),
-                                                    to=now(),
-                                                    interval=CandleInterval(5)).candles
-            candles.append(candle)
-        except:
-            f.append(idx)
-        for c in candles:
-            tmp_df.append(create_dataset(c, idx))
-        errors['figi'] = f
-    return tmp_df, errors
-
-
 def create_shares_parquet(shares, fn):
     figi = shares.figi.values
-    for idx in tqdm(figi):
-        df, errors = fn(idx)
-        time.sleep(1)
-        df = pd.concat(df, ignore_index=True)
-        df.to_parquet(f'Shares/2022_now/{idx}.parquet')
-        errors = pd.DataFrame(errors)
-        errors.to_parquet(f'Shares/2022_now/{idx}_err.parquet')
+    good_figi = []
+    while len(good_figi) != len(figi):
+        for idx in tqdm(figi):
+            df, errors = fn(idx)
+            good_figi.append(idx)
+            time.sleep(1)
+            df = pd.concat(df, ignore_index=True)
+            df.to_parquet(f'Shares/2022_now/{idx}.parquet')
+            errors = pd.DataFrame(errors)
+            errors.to_parquet(f'Shares/2022_now/{idx}_err.parquet')
