@@ -169,18 +169,12 @@ def get_all_candles2022_now(idx):
     return tmp_df, errors
 
 
-shares = get_shares_info()
-
-
 def create_shares_parquet(shares, fn):
     figi = shares.figi.values
-    for idx in tqdm(figi[1600:]):
+    for idx in tqdm(figi):
         df, errors = fn(idx)
-        time.sleep(3)
+        time.sleep(1)
         df = pd.concat(df, ignore_index=True)
         df.to_parquet(f'Shares/2022_now/{idx}.parquet')
         errors = pd.DataFrame(errors)
         errors.to_parquet(f'Shares/2022_now/{idx}_err.parquet')
-
-
-create_shares_parquet(shares, get_all_candles2022_now)

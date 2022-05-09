@@ -3,7 +3,7 @@ import os
 from tqdm.auto import tqdm
 
 #PATH_TO_SHARES = "Shares/shares/"
-PATH_TO_SHARES = "Shares/2022_now/shares"
+PATH_TO_SHARES = "Shares/2022_now/shares/"
 
 def make_table(PATH):
     result_df = pd.DataFrame()
