@@ -1,7 +1,7 @@
 from tinkoff.invest import Client, CandleInterval
 from tinkoff.invest.utils import now
 
-from Collect_data.collect_all_candles import create_dataset
+from Collect_data.DataCollector import DataCollector
 from sql_supporter.sql_sup import Sqler
 import keyring
 from datetime import datetime
@@ -13,6 +13,8 @@ import time
 TOKEN = keyring.get_password('TOKEN', 'INVEST')
 SANDBOX_TOKEN = keyring.get_password('TOKEN', 'SANDBOX')
 sandbox_account_id = keyring.get_password('ACCOUNT_ID', 'SANDBOX')
+dc = DataCollector(SANDBOX_TOKEN)
+create_dataset = dc.create_dataset
 
 
 def update_candles(idx, from_):
@@ -20,7 +22,7 @@ def update_candles(idx, from_):
         candle = client.market_data.get_candles(figi=idx,
                                                 from_=from_,
                                                 to=now(),
-                                                interval=CandleInterval(5)).candles
+                                                    interval=CandleInterval(5)).candles
 
         tmp_df = create_dataset(candle, idx)
     return tmp_df
@@ -51,10 +53,9 @@ while len(good_figi) != len(figi):
         if delta.days >= 1 and idx[0] not in good_figi:
             try:
                 df = update_candles(idx=idx[0], from_=last_day)
-                sqler.insert(df,'candles_day')
+                sqler.insert(df, 'candles_day')
                 good_figi.append(idx[0])
             except:
                 continue
         else:
             continue
-

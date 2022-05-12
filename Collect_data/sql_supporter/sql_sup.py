@@ -4,7 +4,7 @@ import keyring
 
 
 class Sqler:
-    def __init__(self, url="jdbc:postgresql://localhost:5432/", user=None, password=None):
+    def __init__(self, url="jdbc:postgresql://localhost:5432/shares", user=None, password=None):
         self.spark = SparkSession.builder.config("spark.jars", "postgresql-42.2.5.jar") \
             .config("spark.jars.packages", "org.postgresql:postgresql:42.2.5") \
             .config('spark.driver.maxResultSize', '20g').config("spark.executor.memory", "20g") \
@@ -77,3 +77,10 @@ class Sqler:
     def insert(self, df, table):
         df = self.spark.createDataFrame(df)
         df.write.insertInto(tableName=table, overwrite=False)
+
+    def create_table(self,df,table):
+        mode = 'overwrite'
+        url = self._url
+        properties = {"user": self._user,"password": self._pass,"driver": "org.postgresql.Driver"}
+        spark_df = self.spark.createDataFrame(df)
+        spark_df.write.jdbc(url=url, table=f"{table}", mode=mode, properties=properties)
