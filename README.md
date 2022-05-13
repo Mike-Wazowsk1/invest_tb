@@ -6,5 +6,5 @@
 - Realize function to add new data to database
 - Make Class User
 - Realize logic for strategies
+- Add update data to DataCollector
 - Realize simple strategy
-
