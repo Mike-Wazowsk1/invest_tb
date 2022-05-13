@@ -273,6 +273,3 @@ class DataCollector:
             sqler.create_table(df,'ru_feeds')
 
         return df
-
-dc = DataCollector(SANDBOX_TOKEN)
-dc.make_ru_news_dataset(True)
