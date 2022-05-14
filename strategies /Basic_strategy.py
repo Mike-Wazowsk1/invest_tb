@@ -7,7 +7,7 @@ from tinkoff.invest import Client
 import logging
 from tinkoff.invest.services import Services
 from joblib import Parallel, delayed
-from tinkoff.invest.utils import quotation_to_decimal
+from tinkoff.invest.utils import quotation_to_decimal,decimal_to_quotation
 
 from Collect_data.sql_supporter.sql_sup import Sqler
 from stats.stats_data import Stats
@@ -29,47 +29,28 @@ def time_of_function(function):
     return wrapped
 
 
-USER = 'nikolay'
-SQL_PASS = keyring.get_password('SQL', USER)
-url = "jdbc:postgresql://localhost:5432/shares"
-TOKEN = keyring.get_password('TOKEN', 'INVEST')
-SANDBOX_TOKEN = keyring.get_password('TOKEN', 'SANDBOX')
-sandbox_account_id = keyring.get_password('ACCOUNT_ID', 'SANDBOX')
-
-
 class Strategy:
     def __init__(self, token, url, user, sql_pass):
         self.sqler = Sqler(url=url, user=user, password=sql_pass)
         self.sc = self.sqler.spark.sparkContext
         figi = self.sqler.read_sql("""SELECT distinct(figi) from candles_day""").collect()
         self.figi = [row.figi for row in figi]
-        self.client = Client(token=token)
-        self.user = User()
+        self.token = token
 
-    @time_of_function
     def get_agg_with_date_by_figi(self, agg, col,figi, from_, to, table):
         df = self.sqler.select_agg_with_date_figi(agg, col,figi, from_, to, table).collect()
         result = df[0][0]
         return result
 
-    @time_of_function
     def get_agg_all_figi_with_date(self, agg, col, from_, to, table):
         df = self.sqler.select_agg_with_date_all_figi(agg, col, from_, to, table).collect()
         result = {row.figi: row[f'{agg}'] for row in df}
         return result
 
-    @time_of_function
     def get_current_prices(self):
-        with self.client as client:
+        with Client(self.token) as client:
             prices = client.market_data.get_last_prices(figi=self.figi).last_prices
             figi_arr = [row.figi for row in prices]
             price_arr = [row.price for row in prices]
             current_df = {figi: quotation_to_decimal(price) for figi, price in zip(figi_arr, price_arr)}
         return current_df
-
-
-class LineStrategy(Strategy):
-        def __init__(self,token,url,user,sql_pass):
-            super().__init__(token,url,user,sql_pass)
-            pass
-
