@@ -7,12 +7,12 @@ import keyring
 from datetime import datetime
 from tqdm.auto import tqdm
 import pandas as pd
-from multiprocessing.pool import ThreadPool
-import time
+
 
 TOKEN = keyring.get_password('TOKEN', 'INVEST')
 SANDBOX_TOKEN = keyring.get_password('TOKEN', 'SANDBOX')
 sandbox_account_id = keyring.get_password('ACCOUNT_ID', 'SANDBOX')
+
 dc = DataCollector(SANDBOX_TOKEN)
 create_dataset = dc.create_dataset
 

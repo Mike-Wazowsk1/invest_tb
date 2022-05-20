@@ -1,11 +1,11 @@
 import time
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone, tzinfo
 from tqdm.auto import tqdm
 import keyring
 from tinkoff.invest import CandleInterval, Client, Quotation
 from tinkoff.invest.utils import now
-from joblib import Parallel,delayed
+from joblib import Parallel, delayed
 from tinkoff.invest.utils import quotation_to_decimal
 from typing import List
 import feedparser
@@ -13,6 +13,8 @@ import re
 import pandas as pd
 import pymorphy2
 from googletrans import Translator
+import numpy as np
+import pytz
 
 from Collect_data.sql_supporter.sql_sup import Sqler
 
@@ -28,8 +30,14 @@ def cleanhtml(raw_html):
 
 
 class DataCollector:
-    def __init__(self, token=None):
+    def __init__(self, token=None, sources=None, user='nikolay'):
+        if sources is None:
+            sources = ['https://moex.com/export/news.aspx?cat=100', 'https://www.finam.ru/analysis/conews/rsspoint']
+        self.token = token
         self.client = Client(token=token)
+        self.USER = user
+        self.SQL_PASS = keyring.get_password('SQL', self.USER)
+        self.sources = sources
 
     def get_shares_info(self):
         with self.client as client:
@@ -134,9 +142,9 @@ class DataCollector:
              'is_complete': is_completes})
         return df
 
-    def get_all_candles(self, idx):
+    def get_all_candles_day(self, idx, interval, start):
 
-        start = datetime(2000, 1, 1)
+        start = datetime(*start)
         tmp_df = []
         candles = []
         errors = {}
@@ -149,7 +157,7 @@ class DataCollector:
                         candle = client.market_data.get_candles(figi=idx,
                                                                 from_=datetime(2022, 1, 1),
                                                                 to=now(),
-                                                                interval=CandleInterval(5)).candles
+                                                                interval=CandleInterval(interval)).candles
                         candles.append(candle)
                     except:
                         f.append(idx)
@@ -171,9 +179,35 @@ class DataCollector:
         errors['y'] = l
         return tmp_df, errors
 
-    @staticmethod
-    def create_shares_parquet(shares, fn):
-        figi = shares.figi.values
+    def get_all_candles_min(self, idx, interval, start):
+        start = datetime(*start)
+        tmp_df = []
+        candles = []
+        good_days = []
+        n = datetime(datetime.now().date().year, datetime.now().date().month, datetime.now().date().day)
+        delta = n - start
+        with Client(token=self.token) as client:
+            while len(good_days) != int(delta.total_seconds() / 86400):
+                for d in range(int(delta.total_seconds() / 86400)):
+                    if d not in good_days:
+                        try:
+                            candle = client.market_data.get_candles(figi=idx,
+                                                                    from_=start + timedelta(days=d),
+                                                                    to=start + timedelta(days=d + 1),
+                                                                    interval=CandleInterval(interval)).candles
+                            candles.append(candle)  # 86400
+
+                            good_days.append(d)
+
+                        except:
+                            continue
+        for c in candles:
+            tmp_df.append(self.create_dataset(c, idx))
+        return tmp_df
+
+    def create_shares_parquet(self, fn):
+        figi = self.get_shares_info().figi.values
+        # figi = shares.figi.values
         good_figi = []
         while len(good_figi) != len(figi):
             for idx in tqdm(figi):
@@ -185,8 +219,7 @@ class DataCollector:
                 errors = pd.DataFrame(errors)
                 errors.to_parquet(f'Shares/2022_now/{idx}_err.parquet')
 
-    @staticmethod
-    def make_ru_news_dataset(sql=False):
+    def make_ru_news_dataset(self, sql=False):
         def make_date(entry):
             mon = entry.published_parsed.tm_mon
             day = entry.published_parsed.tm_mday
@@ -204,7 +237,7 @@ class DataCollector:
             lower = set('абвгдеёжзийклмнопрстуфхцчшщъыьэюя')
             return lower.intersection(name.lower()) != set()
 
-        def get_cases(name: str,currency):
+        def get_cases(name: str, currency):
             morph = pymorphy2.MorphAnalyzer()
             if is_cyrillic(name):
                 lex = morph.parse(name)[0].lexeme
@@ -221,15 +254,15 @@ class DataCollector:
                 lexemes = [name, name + "'s|"]
             return ''.join(lexemes)
 
-        def target_builder(name: str, ticker: str,currency):
+        def target_builder(name: str, ticker: str, currency):
             ru_dict = {"Fix Price Group": "Фикс Прайс", "O'Key": "О'КЕЙ",
                        "Ozon Holdings PLC": "Озон", "Polymetal": "Полиметалл",
                        "QIWI": "Киви", "TCS Group": "Тинькофф",
                        "VK": "ВКонтакте"}
             if name in ru_dict:
-                return f"{name}|{ticker}|" + get_cases(ru_dict[name],currency)
+                return f"{name}|{ticker}|" + get_cases(ru_dict[name], currency)
             else:
-                return f"{name}|{ticker}" + get_cases(name,currency)
+                return f"{name}|{ticker}" + get_cases(name, currency)
 
         def take_news(sources, target):
             titles = []
@@ -256,20 +289,85 @@ class DataCollector:
                         else:
                             s.append('finam')
 
-
-            titles = pd.DataFrame({'name':target.split('|')[0], 'date': dates, 'source': s, 'title': titles,
-                                   'summary':summary})
+            titles = pd.DataFrame({'name': target.split('|')[0], 'date': dates, 'source': s, 'title': titles,
+                                   'summary': summary})
             return titles
 
-        USER = 'nikolay'
-        SQL_PASS = keyring.get_password('SQL', USER)
-        sqler = Sqler(user=USER,password=SQL_PASS)
-        sources = ['https://moex.com/export/news.aspx?cat=100', 'https://www.finam.ru/analysis/conews/rsspoint']
+        sqler = Sqler(user=self.USER, password=self.SQL_PASS)
+
         figi = sqler.read_sql("""SELECT DISTINCT name,ticker,currency from shares_info""").collect()
-        targets = Parallel(n_jobs=-1)(delayed(target_builder)(row.name, row.ticker,row.currency) for row in tqdm(figi) if row.currency == 'rub')
-        t = Parallel(n_jobs=-1)(delayed(take_news)(sources, target) for target in tqdm(targets))
+        targets = Parallel(n_jobs=-1)(
+            delayed(target_builder)(row.name, row.ticker, row.currency) for row in tqdm(figi) if row.currency == 'rub')
+        t = Parallel(n_jobs=-1)(delayed(take_news)(self.sources, target) for target in tqdm(targets))
         df = pd.concat(t)
         if sql:
-            sqler.create_table(df,'ru_feeds')
+            sqler.create_table(df, 'ru_feeds')
 
         return df
+
+    def data_updater(self):
+        sqler = Sqler(user=self.USER, password=self.SQL_PASS)
+        shares = self.get_shares_info()
+        ru_figi = shares[shares['currency'] == 'rub'].figi
+        last_day = sqler.get_last_date('candles_day_rus').collect()[0].min  # 5
+        last_hour = sqler.get_last_date('candles_hour_rus').collect()[0].min  # 4
+        last_15min = sqler.get_last_date('candles_15min_rus').collect()[0].min  # 3
+        last_5min = sqler.get_last_date('candles_5min_rus').collect()[0].min  # 2
+        last_1min = sqler.get_last_date('candles_1min_rus').collect()[0].min  # 1
+        idx_to_table = {5:'candles_day_rus',4:'candles_hour_rus',3:'candles_15min_rus',2:'candles_5min_rus',1:'candles_1min_rus'}
+        idx_to_frame = {5: last_day, 4: last_hour, 3: last_15min, 2: last_5min, 1: last_1min}
+        delta_to_frame = {5: timedelta(days=1), 4: timedelta(hours=1), 3: timedelta(minutes=15),
+                          2: timedelta(minutes=5), 1: timedelta(minutes=1)}
+        debug = {5:'day',4:'hour',3:'15min',2:'5min',1:'1min'}
+
+        for i in range(1, 6):
+            for idx in tqdm(ru_figi):
+                time_in_db = idx_to_frame.get(i)
+                tzdata = pytz.timezone('UTC')
+                time_in_db = tzdata.localize(time_in_db)
+                if now() - time_in_db > delta_to_frame.get(i,np.inf):
+                    try:
+
+                        with Client(token=self.token) as client:
+                            candle = client.market_data.get_candles(figi=idx,from_=time_in_db,to=now(),interval=i).candles
+                            pd_df = self.create_dataset(candle,idx)
+                            if not pd_df.empty:
+                                pd_df.is_complete = pd_df.is_complete.apply(int)
+                                sqler.insert(df=pd_df,table=idx_to_table.get(i))
+                    except:
+                        candles = []
+                        with Client(token=self.token) as client:
+                            n = datetime(datetime.now().date().year, datetime.now().date().month,
+                                         datetime.now().date().day)
+                            n = tzdata.localize(n)
+                            delta = n - time_in_db
+                            good_days = []
+                            while len(good_days) != int(delta.total_seconds() / 86400):
+                                for d in range(int(delta.total_seconds() / 86400)):
+                                    if d not in good_days:
+                                        try:
+                                            candle = client.market_data.get_candles(figi=idx,
+                                                                                    from_=time_in_db + timedelta(days=d),
+                                                                                    to=time_in_db + timedelta(
+                                                                                        days=d + 1),
+                                                                                    interval=CandleInterval(
+                                                                                        i)).candles
+                                            good_days.append(d)
+                                            candles.append(candle)
+
+
+
+                                        except:
+                                            continue
+                                df = pd.DataFrame()
+                                for c in candles:
+                                    tmp_df = self.create_dataset(c,idx)
+                                    if not tmp_df.empty:
+                                        df = pd.concat([df,tmp_df])
+                            df.to_parquet(f'debug/{idx}_{debug.get(i)}_from_{time_in_db.date()}_to{now().date()}.parquet')
+
+
+
+
+dc = DataCollector(token=TOKEN)
+dc.data_updater()
