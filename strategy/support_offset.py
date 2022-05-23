@@ -1,30 +1,28 @@
+import asyncio
 import datetime
 import time
 from decimal import Decimal
 
 import keyring
 from tinkoff.invest import Client, OrderDirection, OrderType, Quotation
-from tinkoff.invest.utils import decimal_to_quotation, quotation_to_decimal
-
+from tinkoff.invest.utils import decimal_to_quotation, quotation_to_decimal, now
 
 import numpy as np
 
 from User import User
 from tinkoff.invest import Client
-
-from tinkoff.invest.utils import quotation_to_decimal,decimal_to_quotation
+from datetime import timedelta
+from tinkoff.invest.utils import quotation_to_decimal, decimal_to_quotation
 
 from Collect_data.sql_supporter.sql_sup import Sqler
 
 import time
 
+from threading import Thread
 
 TOKEN = keyring.get_password('TOKEN', 'INVEST')
 SANDBOX_TOKEN = keyring.get_password('TOKEN', 'SANDBOX')
 sandbox_account_id = keyring.get_password('ACCOUNT_ID', 'SANDBOX')
-
-
-
 
 
 def time_of_function(function):
@@ -41,12 +39,12 @@ class Strategy:
     def __init__(self, token, url, user, sql_pass):
         self.sqler = Sqler(url=url, user=user, password=sql_pass)
         self.sc = self.sqler.spark.sparkContext
-        figi = self.sqler.read_sql("""SELECT distinct(figi) from candles_day""").collect()
+        figi = self.sqler.read_sql("""SELECT distinct(figi) from candles_day_rus""").collect()
         self.figi = [row.figi for row in figi]
         self.token = token
 
-    def get_agg_with_date_by_figi(self, agg, col,figi, from_, to, table):
-        df = self.sqler.select_agg_with_date_figi(agg, col,figi, from_, to, table).collect()
+    def get_agg_with_date_by_figi(self, agg, col, figi, from_, to, table):
+        df = self.sqler.select_agg_with_date_figi(agg, col, figi, from_, to, table).collect()
         result = df[0][0]
         return result
 
@@ -73,35 +71,36 @@ class Support_Offset(Strategy):
 
         super().__init__(token=token, url=url, user=user, sql_pass=sql_pass)
         self.lots = self.sqler.read_sql("""
-                    SELECT figi,lot from shares_info""").toPandas()
+                    SELECT figi,lot from shares_info where currency= 'rub' """).toPandas()
 
-    def start(self, flag, account_id=None):
-        while flag:
-            with Client(token=self.token) as client:
-                def find_quantity_to_buy(figi, curr_price):
-                    lot = self.lots[self.lots.figi == f"{figi}"].lot.values[0]
-                    money_to_actions = [m[1] for m in user.available_money if m[0] == account_id][0] * Decimal(0.1)
-                    quantity = int(money_to_actions / (lot * quotation_to_decimal(curr_price)))
-                    return quantity, lot
+    def start(self, flag=True, account_id=None,mode=None):
+        with Client(token=self.token) as client:
+            def find_quantity_to_buy(figi, curr_price):
+                lot = self.lots[self.lots.figi == f"{figi}"].lot.values[0]
+                money_to_actions = [m[1] for m in user.available_money if m[0] == account_id][0] * Decimal(0.2)
+                quantity = int(money_to_actions / (lot * quotation_to_decimal(curr_price)))
+                return quantity, lot
 
-                user = User(client)
-                start_time = time.time()
-                order_id = str(np.random.random(1))
+            user = User(client)
+            order_id = str(np.random.random(1))
+            while True:
                 current_prices = self.get_current_prices()
                 prev_max = self.get_agg_all_figi_with_date(agg='max', col='close',
-                                                           from_=datetime.datetime.now() - datetime.timedelta(days=3),
-                                                           to='now', table='candles_day2022')
-                prev_min = self.get_agg_all_figi_with_date(agg='max', col='close',
-                                                           from_=datetime.datetime.now() - datetime.timedelta(days=3),
-                                                           to='now', table='candles_day2022')
+                                                           from_=datetime.datetime(2022, 2, 24),
+                                                           to=now() - timedelta(days=4), table='candles_day_rus')
+                prev_min = self.get_agg_all_figi_with_date(agg='min', col='close',
+                                                           from_=datetime.datetime(2022, 2, 24),
+                                                           to=now() - timedelta(days=4), table='candles_day_rus')
 
                 def find_signals(curr, max_price, min_price):
                     sell = []
                     buy = []
                     for c in curr.keys():
-                        if curr.get(c) >= max_price.get(c, np.inf):
+                        if curr.get(c) > max_price.get(c, np.inf):
+                            print('SELL:', c, curr.get(c), max_price.get(c, -np.inf))
                             sell.append({c: curr[c]})
-                        elif curr.get(c) <= min_price.get(c, -np.inf):
+                        elif curr.get(c) < min_price.get(c, -np.inf):
+                            print('BUY:', c, curr.get(c), min_price.get(c, -np.inf))
                             buy.append({c: curr[c]})
                     return buy, sell
 
@@ -109,6 +108,7 @@ class Support_Offset(Strategy):
 
                 if len(buy) != 0:
                     for d in buy:
+
                         figi = list(d.keys())[0]
                         price = decimal_to_quotation(list(d.values())[0])
                         q, lot = find_quantity_to_buy(figi, price)
@@ -123,6 +123,7 @@ class Support_Offset(Strategy):
                         figi = list(d.keys())[0]
                         price = decimal_to_quotation(list(d.values())[0])
                         q, lot = find_quantity_to_buy(figi, price)
+
                         if q > lot:
                             client.orders.post_order(figi=figi, quantity=q,
                                                      price=price,
@@ -153,6 +154,6 @@ class Support_Offset(Strategy):
                                                  direction=OrderDirection(2), account_id=account_id,
                                                  order_type=OrderType(2),
                                                  order_id=order_id)  # direct 1-buy 2 -sell| type 1-limit 2-market
-                print(time.time() - start_time)
 
-
+# sup = Support_Offset(TOKEN)
+# sup.start(True, "2009055977")

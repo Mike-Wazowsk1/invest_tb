@@ -68,16 +68,6 @@ class Sqler:
         return self.read_sql(q)
 
     def select_agg_with_date_all_figi(self, agg, col, from_, to, table):
-        if type(from_) == (tuple or list):
-            from_ = datetime(*from_)
-        elif type(from_) == datetime:
-            from_ = from_
-        if type(to) == str and to.lower() == 'now':
-            to = datetime.now()
-        elif type(to) == tuple:
-            to = datetime(*to)
-        elif type(to) == str and 'd' in to:
-            to = from_ + timedelta(days=int(to[:-1]))
         q = f"""
                 SELECT figi,{agg}({col}) from {table}
                 where time::timestamp::date  between to_date('{from_}','YYYY-mm-dd') and to_date('{to}','YYYY-mm-dd')

@@ -306,6 +306,7 @@ class DataCollector:
         return df
 
     def data_updater(self):
+
         sqler = Sqler(user=self.USER, password=self.SQL_PASS)
         shares = self.get_shares_info()
         ru_figi = shares[shares['currency'] == 'rub'].figi
@@ -319,52 +320,55 @@ class DataCollector:
         delta_to_frame = {5: timedelta(days=1), 4: timedelta(hours=1), 3: timedelta(minutes=15),
                           2: timedelta(minutes=5), 1: timedelta(minutes=1)}
         debug = {5:'day',4:'hour',3:'15min',2:'5min',1:'1min'}
+        while True:
+            for i in range(1, 6):
+                for idx in tqdm(ru_figi):
+                    time_in_db = sqler.get_last_date_by_figi(idx,idx_to_table.get(i)).collect()[0].max
+                    if time_in_db:
+                        tzdata = pytz.timezone('Europe/Moscow')
+                        time_in_db = tzdata.localize(time_in_db)
+                        if now() - time_in_db > delta_to_frame.get(i):
+                            try:
+                                with Client(token=self.token) as client:
+                                    candle = client.market_data.get_candles(figi=idx,from_=time_in_db,to=time_in_db+timedelta(days=1),interval=i).candles
+                                    pd_df = self.create_dataset(candle,idx)
+                                    print(pd_df)
+                                    if not pd_df.empty:
+                                        pd_df.is_complete = pd_df.is_complete.apply(int)
+                                        sqler.insert(df=pd_df,table=idx_to_table.get(i))
+                            except:
+                                time.sleep(60)
 
-        for i in range(1, 6):
-            for idx in tqdm(ru_figi):
-                time_in_db = idx_to_frame.get(i)
-                tzdata = pytz.timezone('UTC')
-                time_in_db = tzdata.localize(time_in_db)
-                if now() - time_in_db > delta_to_frame.get(i,np.inf):
-                    try:
-
-                        with Client(token=self.token) as client:
-                            candle = client.market_data.get_candles(figi=idx,from_=time_in_db,to=now(),interval=i).candles
-                            pd_df = self.create_dataset(candle,idx)
-                            if not pd_df.empty:
-                                pd_df.is_complete = pd_df.is_complete.apply(int)
-                                sqler.insert(df=pd_df,table=idx_to_table.get(i))
-                    except:
-                        candles = []
-                        with Client(token=self.token) as client:
-                            n = datetime(datetime.now().date().year, datetime.now().date().month,
-                                         datetime.now().date().day)
-                            n = tzdata.localize(n)
-                            delta = n - time_in_db
-                            good_days = []
-                            while len(good_days) != int(delta.total_seconds() / 86400):
-                                for d in range(int(delta.total_seconds() / 86400)):
-                                    if d not in good_days:
-                                        try:
-                                            candle = client.market_data.get_candles(figi=idx,
-                                                                                    from_=time_in_db + timedelta(days=d),
-                                                                                    to=time_in_db + timedelta(
-                                                                                        days=d + 1),
-                                                                                    interval=CandleInterval(
-                                                                                        i)).candles
-                                            good_days.append(d)
-                                            candles.append(candle)
-
-
-
-                                        except:
-                                            continue
-                                df = pd.DataFrame()
-                                for c in candles:
-                                    tmp_df = self.create_dataset(c,idx)
-                                    if not tmp_df.empty:
-                                        df = pd.concat([df,tmp_df])
-                            df.to_parquet(f'debug/{idx}_{debug.get(i)}_from_{time_in_db.date()}_to{now().date()}.parquet')
+                            # candles = []
+                            # with Client(token=self.token) as client:
+                            #     n = datetime(datetime.now().date().year, datetime.now().date().month,
+                            #                  datetime.now().date().day)
+                            #     n = tzdata.localize(n)
+                            #     delta = n - time_in_db
+                            #     good_days = []
+                            #     while len(good_days) != int(delta.total_seconds() / 86400):
+                            #         for d in range(int(delta.total_seconds() / 86400)):
+                            #             if d not in good_days:
+                            #                 try:
+                            #                     candle = client.market_data.get_candles(figi=idx,
+                            #                                                             from_=time_in_db + timedelta(days=d),
+                            #                                                             to=time_in_db + timedelta(
+                            #                                                                 days=d + 1),
+                            #                                                             interval=CandleInterval(
+                            #                                                                 i)).candles
+                            #                     good_days.append(d)
+                            #                     candles.append(candle)
+                            #
+                            #
+                            #
+                            #                 except:
+                            #                     continue
+                            #         df = pd.DataFrame()
+                            #         for c in candles:
+                            #             tmp_df = self.create_dataset(c,idx)
+                            #             if not tmp_df.empty:
+                            #                 df = pd.concat([df,tmp_df])
+                            #                 df.to_parquet(f'debug/{idx}_{debug.get(i)}_from_{time_in_db.date()}_to{now().date()}.parquet')
 
 
 
